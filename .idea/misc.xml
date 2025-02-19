@@ -3,7 +3,7 @@
   <component name="Black">
     <option name="sdkName" value="Python 3.10 (SecureAuditix)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.10 (SecureAuditix)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.10 (DB_Tool_AWS_EC2)" project-jdk-type="Python SDK" />
   <component name="PyCharmProfessionalAdvertiser">
     <option name="shown" value="true" />
   </component>

@@ -1,14 +1,22 @@
+import os
+import re
 import subprocess
 from datetime import datetime
-import os
-from pathlib import Path
-from django.contrib import messages
-from django.http import JsonResponse
+
 import cx_Oracle  # For Oracle database connections
-import pyodbc  # For Microsoft SQL Server connections
+import django
 import psycopg2  # For PostgreSQL connections
-import re
+import pyodbc  # For Microsoft SQL Server connections
+from django.http import HttpResponse
+from django.http import JsonResponse
 from django.shortcuts import render
+
+# Set the correct settings module
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "SecureAuditix.settings")
+
+# Initialize Django
+django.setup()
+
 
 def home(request):
     return render(request, 'index.html')  # Ensure 'index.html' exists in your templates directory
@@ -31,6 +39,7 @@ def validate_dsn(dsn_value):
 
 # Main audit function
 def audit_database(request):
+    global settings  # Declare settings as global if needed
     if request.method == "POST":
         data = request.POST
         db_type = data.get("db_type")
@@ -55,6 +64,7 @@ def audit_database(request):
             if not database or not validate_input(database):
                 return JsonResponse({"error": "Invalid or missing Database."}, status=400)
 
+
         try:
             if db_type == "Oracle":
                 # Connect to Oracle database
@@ -65,11 +75,14 @@ def audit_database(request):
                 # Get the current date and time for the report
                 current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # Save the report in HTML format
-                downloads_path = str(Path.home() / "Downloads")
-                results_file_path = os.path.join(downloads_path, "Oracle Results.htm")
+                # Define file path inside Django's media directory
+                file_name = "Oracle_Results.html"
+                file_path = os.path.join(settings.MEDIA_ROOT, file_name)
 
-                with open(results_file_path, "w") as f:
+                # Ensure MEDIA_ROOT exists
+                os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
+
+                with open(file_path, "w") as f:
                     f.write(f"""<html lang="en">
                                               <head>
                                                  <meta charset="UTF-8">
@@ -7232,42 +7245,92 @@ def audit_database(request):
                                    </html>'''.format(Passed, Failed, Manual, NoPermission, Passed,
                                                      Failed, Manual,
                                                      NoPermission))
-                        return render(request, "index.html", {"message": f"Connection successful! Results saved to {results_file_path}."})
-
-                        #messages.success(request, f"Connection successful! Results saved to {results_file_path}.")
+                        # Return the generated HTML file as a download
+                        with open(file_path, 'r') as file:
+                            response = HttpResponse(file.read(), content_type='text/html')
+                            response['Content-Disposition'] = f'attachment; filename={file_name}'
+                            return response
 
                     elif selected_standard == "DISA_STIG":
-                        # Execute the query
-                        cursor.execute("SELECT banner AS version FROM v$version")
+                        # Connect to Oracle database
+                        connection = cx_Oracle.connect(username, password, dsn)
+                        cursor = connection.cursor()
 
-                        # Fetch the result
-                        version_info = cursor.fetchall()
+                        # Get the current date and time for the report
+                        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                        # Loop through the result and write it into the HTML file
-                        for row in version_info:
-                            f.write(f'''<div class="info-box">
+                        # Define the file path for the audit report in Django's media directory
+                        file_name = "Oracle_Audit_Report.htm"
+                        file_path = os.path.join(settings.MEDIA_ROOT, file_name)
+
+                        # Ensure the media directory exists
+                        os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
+
+                        with open(file_path, "w") as f:
+                            f.write(f"""<html lang="en">
+                                          <head>
+                                             <meta charset="UTF-8">
+                                             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                             <title>Audit Report</title>
+                                             <style>
+                                                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                                                .header {{ text-align: right; font-size: 14px; margin-bottom: 10px; }}
+                                                .info-box {{ background-color: #f2f2f2; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 20px; font-size: 14px; line-height: 1.5; }}
+                                                 h2 {{ color: #00008B; text-align: center; margin-top: 20px; }}
+                                                 h3 {{ color: #00008B; text-align: left; margin-top: 20px; }}
+                                                 table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                                                 table, th, td {{ border: 1px solid #ddd; }}
+                                                 th, td {{ padding: 12px; text-align: left; }}
+                                                 th {{ background-color: #00008B; color: white; }}
+                                                 tr:nth-child(even) {{ background-color: #f2f2f2; }}
+                                                 .status-passed {{ color: green; }}
+                                                 .status-failed {{ color: red; }}
+                                                 .status-manual {{ color: black; }}
+                                                 .status-nopermission {{ color: yellow; }}
+                                                 .footer {{ text-align: center; font-size: 14px; margin-top: 30px; padding: 10px 0; }}
+                                                 .summary-table th, .summary-table td {{ border: 1px solid #ddd; padding: 10px; text-align: center; font-weight: bold; }}
+                                                 .summary-table th {{ background-color: #00008B; color: white; }}
+                                             </style>
+                                          </head>
+                                          <body>
+                                               <div class="header"><strong>Audit Date: </strong>{current_datetime}</div>
+                                               <h2>Database Audit Results</h2>
+                                               <h3>Version Information:</h3>
+                            """)
+
+                            # Execute the query to fetch database version
+                            cursor.execute("SELECT banner AS version FROM v$version")
+                            version_info = cursor.fetchall()
+
+                            # Loop through the result and write it into the HTML file
+                            for row in version_info:
+                                f.write(f'''<div class="info-box">
                                                 <p><strong>{row[0]}</strong><br> </p> 
-                                        </div>''')
+                                          </div>''')
 
-                        # Add a horizontal line for separation
-                        f.write("<hr style='border: 1px solid #00008B; margin: 20px 0;'>\n")
+                            # Add a horizontal line for separation
+                            f.write("<hr style='border: 1px solid #00008B; margin: 20px 0;'>\n")
 
-                        # Write the additional messages in paragraph tags
-                        f.write(
-                            "<p style='font-weight: bold; color: #00008B;'>Database Auditing - DISA STIG is coming soon...</p>\n")
-                        f.write("<p>Currently under maintenance, Update is coming in next release.</p>\n")
-                        f.write("<p>Thank you - Please Visit again.</p>\n")
+                            # Write additional messages
+                            f.write(
+                                "<p style='font-weight: bold; color: #00008B;'>Database Auditing - DISA STIG is coming soon...</p>\n")
+                            f.write("<p>Currently under maintenance, Update is coming in next release.</p>\n")
+                            f.write("<p>Thank you - Please Visit again.</p>\n")
 
-                        # Close the table and add the footer
-
-                        return render(request, "index.html",
-                                      {"message": f"Connection successful! Results saved to {results_file_path}."})
-
-
-                    # Close the table and HTML document
-                    f.write("""</table>
+                            # Add footer
+                            f.write("""<footer style="text-align: center; font-size: 14px; margin-top: 30px; padding: 10px 0;">
+                                          <p> 2024 All Rights Reserved to Secure Auditix tool</p>
+                                          <p>Coded and UI Designed by <strong>Mandavalli Ganesh</strong></p>
+                                       </footer>
                                        </body>
                                        </html>""")
+
+                        # Return the HTML file as a downloadable attachment
+                        with open(file_path, 'r') as file:
+                            response = HttpResponse(file.read(), content_type='text/html')
+                            response['Content-Disposition'] = f'attachment; filename="{file_name}"'
+                            return response
+
             elif db_type == "MS SQL":
                 # Connect to MS SQL Server
                 connection_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}"
@@ -7280,14 +7343,19 @@ def audit_database(request):
                 cursor = conn.cursor()
 
                 # Define download path
-                downloads_path = str(Path.home() / "Downloads")
-                results_file_path = os.path.join(downloads_path, "MS SQL Results.html")
+                # Define file path inside Django's media directory
+                file_name = "MS SQL_Results.htm"
+                file_path = os.path.join(settings.MEDIA_ROOT, file_name)
+
+                # Ensure MEDIA_ROOT exists
+                os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
+
 
                 # Get the current date and time
                 current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 # Write HTML content to the file
-                with open(results_file_path, "w") as f:
+                with open(file_path, "w") as f:
                     f.write(f"""<html lang="en">
                                                             <head>
                                                                <meta charset="UTF-8">
@@ -8485,8 +8553,11 @@ def audit_database(request):
                                                                         Failed,
                                                                         Manual,
                                                                         NoPermission))
-                        return render(request, "index.html",
-                                      {"message": f"Connection successful! Results saved to {results_file_path}."})
+                        # Return the HTML file as a downloadable attachment
+                        with open(file_path, 'r') as file:
+                            response = HttpResponse(file.read(), content_type='text/html')
+                            response['Content-Disposition'] = f'attachment; filename="{file_name}"'
+                            return response
 
                     elif selected_standard == "DISA_STIG":
                         # Run DISA STIG-related queries
@@ -8524,8 +8595,11 @@ def audit_database(request):
 
                         # Close the table and add the footer
 
-                        return render(request, "index.html",
-                                      {"message": f"Connection successful! Results saved to {results_file_path}."})
+                        # Return the HTML file as a downloadable attachment
+                        with open(file_path, 'r') as file:
+                            response = HttpResponse(file.read(), content_type='text/html')
+                            response['Content-Disposition'] = f'attachment; filename="{file_name}"'
+                            return response
 
                 # Close the connection after operations
                 conn.close()
@@ -8558,13 +8632,15 @@ def audit_database(request):
                             # Get the current datetime for the report header
                             current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                            # Path to save the HTML file in the Downloads directory
-                            downloads_path = str(Path.home() / "Downloads")
-                            results_file_path = os.path.join(downloads_path, "Postgres_SQL_results.htm")
+                            # Define file path inside Django's media directory
+                            file_name = "Postgres_SQL_results.htm"
+                            file_path = os.path.join(settings.MEDIA_ROOT, file_name)
 
+                            # Ensure MEDIA_ROOT exists
+                            os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 
                             # Open the file for writing (HTML structure)
-                            with open(results_file_path, "w") as f:
+                            with open(file_path, "w") as f:
                                 # Write the initial HTML structure
                                 f.write(f"""<html lang="en">
                                                                                     <head>
@@ -10469,8 +10545,11 @@ def audit_database(request):
                             if connection:
                                 connection.close()
 
-                            return render(request, "index.html",
-                                          {"message": f"Connection successful! Results saved to {results_file_path}."})
+                                # Return the HTML file as a downloadable attachment
+                                with open(file_path, 'r') as file:
+                                    response = HttpResponse(file.read(), content_type='text/html')
+                                    response['Content-Disposition'] = f'attachment; filename="{file_name}"'
+                                    return response
 
                     else:
 
@@ -10518,13 +10597,16 @@ def audit_database(request):
 
                                 # Path to save the HTML file in the Downloads directory
 
-                                downloads_path = str(Path.home() / "Downloads")
+                                # Define file path inside Django's media directory
+                                file_name = "Postgres_SQL_results.htm"
+                                file_path = os.path.join(settings.MEDIA_ROOT, file_name)
 
-                                results_file_path = os.path.join(downloads_path, "Postgres_SQL_results.htm")
+                                # Ensure MEDIA_ROOT exists
+                                os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 
                                 # Open the file for writing (HTML structure)
 
-                                with open(results_file_path, "w") as f:
+                                with open(file_path, "w") as f:
 
                                     # Write the initial HTML structure
 
@@ -10632,9 +10714,11 @@ def audit_database(request):
                                 if 'connection' in locals() and connection:
                                     connection.close()
 
-                                return render(request, "index.html",
-                                              {
-                                                  "message": f"Connection successful! Results saved to {results_file_path}."})
+                                    # Return the HTML file as a downloadable attachment
+                                    with open(file_path, 'r') as file:
+                                        response = HttpResponse(file.read(), content_type='text/html')
+                                        response['Content-Disposition'] = f'attachment; filename="{file_name}"'
+                                        return response
 
                 except (psycopg2.OperationalError) as e:
                     return JsonResponse({"error": f"Database Error: {str(e)}"}, status=500)
